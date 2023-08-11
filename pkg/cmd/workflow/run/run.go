@@ -27,6 +27,7 @@ type RunOptions struct {
 	HttpClient func() (*http.Client, error)
 	IO         *iostreams.IOStreams
 	BaseRepo   func() (ghrepo.Interface, error)
+	Prompter   iprompter
 
 	Selector  string
 	Ref       string
@@ -39,10 +40,15 @@ type RunOptions struct {
 	Prompt bool
 }
 
+type iprompter interface {
+	Input(string, string) (string, error)
+}
+
 func NewCmdRun(f *cmdutil.Factory, runF func(*RunOptions) error) *cobra.Command {
 	opts := &RunOptions{
 		IO:         f.IOStreams,
 		HttpClient: f.HttpClient,
+		Prompter:   f.Prompter,
 	}
 
 	cmd := &cobra.Command{
@@ -198,7 +204,7 @@ func (ia *InputAnswer) WriteAnswer(name string, value interface{}) error {
 	return fmt.Errorf("unexpected value type: %v", value)
 }
 
-func collectInputs(yamlContent []byte) (map[string]string, error) {
+func collectInputs(p iprompter, yamlContent []byte) (map[string]string, error) {
 	inputs, err := findInputs(yamlContent)
 	if err != nil {
 		return nil, err
@@ -209,6 +215,10 @@ func collectInputs(yamlContent []byte) (map[string]string, error) {
 	if len(inputs) == 0 {
 		return providedInputs, nil
 	}
+
+	// TODO port this to ask each input in turn
+	// TODO findInputs should return a list of inputs sorted by name
+	// TODO decide how how to implement the Required behavior with new prompter
 
 	qs := []*survey.Question{}
 	for inputName, input := range inputs {
@@ -290,7 +300,7 @@ func runRun(opts *RunOptions) error {
 		if err != nil {
 			return fmt.Errorf("unable to fetch workflow file content: %w", err)
 		}
-		providedInputs, err = collectInputs(yamlContent)
+		providedInputs, err = collectInputs(opts.Prompter, yamlContent)
 		if err != nil {
 			return err
 		}
